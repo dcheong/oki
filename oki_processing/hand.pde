@@ -42,7 +42,6 @@ class hand {
       PVector start = hull.getPoints().get(startIndex);
       PVector valley = hull.getPoints().get(defectIndex);
       float d = PVector.dist(start, valley);
-      print(d + " ");
       startPoints.add(hull.getPoints().get(startIndex));
       defectPoints.add(hull.getPoints().get(defectIndex));
       depths.add((float)defects.get(i, 0)[3]);

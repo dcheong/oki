@@ -72,3 +72,7 @@ void show(pt X) {
   fill(color(255,0,0));
   ellipse(X.pos.x, X.pos.y, 1, 1);
 }
+
+float dist(pt A, pt B) {
+  return PVector.dist(A.pos, B.pos);
+}

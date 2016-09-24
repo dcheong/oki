@@ -11,7 +11,7 @@ import org.jaudiolibs.beads.*;
 
 import KinectPV2.*;
 
-String collection = "tropical";
+String collection = "cello";
 
 
 KinectPV2 kinect;
@@ -31,7 +31,13 @@ SamplePlayer[] sPlayers = new SamplePlayer[12];
 boolean[] playing = new boolean[12];
 boolean[] looping = new boolean[12];
 Glide[] vGlides = new Glide[12];
+Glide[] rGlides = new Glide[12];
 Gain[] gains = new Gain[12];
+
+Glide reverb;
+int reverbHand;
+float reverbValue = 1.0;
+
 SamplePlayer sp1, sp2;
 
 float volume = 0.;
@@ -40,6 +46,10 @@ float volume = 0.;
 int lCool = 0;
 int rCool = 0;
 int cooldown = 30;
+
+int bIndex = 0;
+boolean stretching = false;
+float lastdist = 0.;
 
 int lIndex = 0;
 int rIndex = 0;
@@ -54,6 +64,8 @@ boolean rPlaying = false;
 
 
 float tileWidth, tileHeight;
+float marginVert = 50;
+float marginHori = 50;
 
 //OPEN CV
 
@@ -67,8 +79,8 @@ void setup() {
   size(512, 424, P3D);
   opencv = new OpenCV(this, 512, 424);
   smooth();
-  tileWidth = width/4;
-  tileHeight = height/3;
+  tileWidth = (width - 2 * marginHori)/4;
+  tileHeight = (height - 2 * marginVert)/3;
 
   kinect = new KinectPV2(this);   
   kinect.enableDepthImg(true);
@@ -84,20 +96,24 @@ void setup() {
   ac = new AudioContext();
   for (int i = 0; i < vGlides.length; i++) {
     vGlides[i] = new Glide(ac, 0., 10);
+    rGlides[i] = new Glide(ac, 1., 30);
   }
   for (int i = 0; i < gains.length; i++) {
     gains[i] = new Gain(ac, 1);
     ac.out.addInput(gains[i]);
   }
+  reverb = new Glide(ac, 1., 30);
   ac.start();
 
   leftHand = new hand();
   int pleft = 0;
   rightHand = new hand();
   int pright = 0;
-}  
+}
+
 void draw() {
-  lights();
+  ambientLight(102, 102, 102);
+  spotLight(255,255,255, width, height, 10, -1, 0, 0, PI/2, 2);
   volume = 0.;
   int sum = 0;
   for (int i = 0; i < gains.length; i++) {
@@ -111,6 +127,9 @@ void draw() {
   float cameraZ = (height/2.0) / tan(fov/2.0); 
   perspective(fov, float(width)/float(height), cameraZ/2.0, cameraZ*2.0); 
   background(color(volume * 255, volume * 100, 255-(volume * 100), volume * 200));
+  if (stretching) {
+    background(color(volume * 100, volume * 100, volume * 100));
+  }
   if (loaded) {
     depthImage = kinect.getDepthImage();
     //image(kinect.getPointCloudDepthImage(), 0,0);
@@ -127,23 +146,23 @@ void draw() {
       for (int j = 0; j < 4; j++) {
         stroke(color(255, 255, 255));
         noFill();
-        if (i * 4 + j == lIndex || i*4 + j == rIndex) {
-        }
+        
         if (playing[i*4+j]) {
           strokeWeight(3);
           stroke(color(255,255,255));
-          float transX = j * tileWidth + tileWidth/2;
-          float transY = i * tileHeight + tileHeight/2;
+          noFill();
+          float transX = j * tileWidth + tileWidth/2 + marginHori;
+          float transY = i * tileHeight + tileHeight/2 + marginVert;
           float transZ = - (gains[i*4+j].getGain() - 0.8) * 50;
           translate(transX, transY, transZ);
           box(tileWidth, tileHeight, 30);
           translate(-transX, -transY, -transZ);
         } else {
           strokeWeight(1);
-          rect(j * tileWidth, i * tileHeight, tileWidth, tileHeight);
+          rect(j * tileWidth + marginHori, i * tileHeight + marginVert, tileWidth, tileHeight);
         }
         fill(color(255, 255, 255));
-        text((i * 4 + j), j * tileWidth + 15, i * tileHeight + 15);
+        text((i * 4 + j), j * tileWidth + marginHori + 15, i * tileHeight + marginVert + 15);
       }
     }
     //get the skeletons as an Arraylist of KSkeletons
@@ -168,77 +187,105 @@ void draw() {
         joints[KinectPV2.JointType_HandLeft].getY());
       rHand = new pt(joints[KinectPV2.JointType_HandRight].getX(), 
         joints[KinectPV2.JointType_HandRight].getY());
-      int rX = floor(rHand.pos.x/tileWidth);
-      int rY = floor(rHand.pos.y/tileHeight);
+      int rX = floor((rHand.pos.x - marginHori)/tileWidth);
+      int rY = floor((rHand.pos.y - marginVert)/tileHeight);
 
-      int lX = floor(lHand.pos.x/tileWidth);
-      int lY = floor(lHand.pos.y/tileHeight);
-
+      int lX = floor((lHand.pos.x - marginHori)/tileWidth);
+      int lY = floor((lHand.pos.y - marginVert)/tileHeight);
+      
+      
       rIndex = abs(rX + rY * 4);
       lIndex = abs(lX + lY * 4);
+      
       if (rIndex > 11) rIndex = 11;
       if (lIndex > 11) lIndex = 11;
       fill(color(255, 255, 255));
       text(rIndex, rHand.pos.x + 15, rHand.pos.y);
       text(lIndex, lHand.pos.x + 15, lHand.pos.y);
-
-      if (skeleton.getLeftHandState() == 3 && lCool > cooldown) {
-        lCool = 0;
-        println("left hand close: " + lIndex);
-        if (playing[lIndex]) {
-          sPlayers[lIndex].kill();
-          playing[lIndex] = false;
+      
+      if (!stretching && lIndex == rIndex && playing[lIndex] && (skeleton.getLeftHandState() == 3 || skeleton.getRightHandState() == 3)) {
+        bIndex = lIndex;
+        stretching = true;
+        lastdist = dist(lHand, rHand);
+        println("stretching");
+      }
+      if (stretching) {
+        if (!(skeleton.getLeftHandState() == 3) && !(skeleton.getRightHandState() == 3)) {
+          stretching = false;
+          println("stopped stretching");
         } else {
-          sPlayers[lIndex] = new SamplePlayer(ac, samples.get(lIndex));
-          sPlayers[lIndex].setLoopCrossFade(0.1);
-          sPlayers[lIndex].setLoopType(SamplePlayer.LoopType.LOOP_FORWARDS);
-          sPlayers[lIndex].setKillOnEnd(false);
-          sPlayers[lIndex].start();
-          playing[lIndex] = true;
-          gains[lIndex].addInput(sPlayers[lIndex]);
+          rGlides[bIndex].setValue(dist(lHand, rHand)/200);
         }
       }
-      if (skeleton.getRightHandState() == 3 && rCool > cooldown) {
-        rCool = 0;
-        println("right hand close: " + rIndex);
-        if (playing[rIndex]) {
-          sPlayers[rIndex].kill();
-          playing[rIndex] = false;
+      if (!stretching) {
+        if (lHand.pos.x > marginHori
+        && lHand.pos.x < width - marginHori
+        && lHand.pos.y > marginVert
+        && lHand.pos.y < height - marginVert) {
+          if (skeleton.getLeftHandState() == 3 && lCool > cooldown) {
+            lCool = 0;
+            println("left hand close: " + lIndex);
+            if (playing[lIndex]) {
+              sPlayers[lIndex].kill();
+              rGlides[lIndex].setValue(1.);
+              playing[lIndex] = false;
+            } else {
+              sPlayers[lIndex] = new SamplePlayer(ac, samples.get(lIndex));
+              sPlayers[lIndex].setLoopCrossFade(0.1);
+              sPlayers[lIndex].setLoopType(SamplePlayer.LoopType.LOOP_FORWARDS);
+              sPlayers[lIndex].setKillOnEnd(false);
+              sPlayers[lIndex].setRate(rGlides[lIndex]);
+              sPlayers[lIndex].start();
+              playing[lIndex] = true;
+              gains[lIndex].addInput(sPlayers[lIndex]);
+            }
+          }
         } else {
-          sPlayers[rIndex] = new SamplePlayer(ac, samples.get(rIndex));
-          sPlayers[rIndex].setLoopCrossFade(0.1);
-          sPlayers[rIndex].setLoopType(SamplePlayer.LoopType.LOOP_FORWARDS);
-          sPlayers[rIndex].setKillOnEnd(false);
-          sPlayers[rIndex].start();
-          playing[rIndex] = true;
-          gains[rIndex].addInput(sPlayers[rIndex]);
+          println(lHand.pos.x + " " + skeleton.getLeftHandState());
+          if (lHand.pos.x < marginHori
+          && lHand.pos.y > marginVert
+          && lHand.pos.y < height - marginVert) {
+            lHand.pos.x = 30;
+            reverbValue = 100 * (height - lHand.pos.y - 2 * marginVert)/(height - marginVert);
+            reverb.setValue(reverbValue);
+            println(reverbValue);
+          }
+        }
+        if (rHand.pos.x > marginHori
+        && rHand.pos.x < width - marginHori
+        && rHand.pos.y > marginVert
+        && rHand.pos.y < height - marginVert) {
+        if (skeleton.getRightHandState() == 3 && rCool > cooldown) {
+          rCool = 0;
+          println("right hand close: " + rIndex);
+          if (playing[rIndex]) {
+            sPlayers[rIndex].kill();
+            rGlides[rIndex].setValue(1.);
+            playing[rIndex] = false;
+          } else {
+            sPlayers[rIndex] = new SamplePlayer(ac, samples.get(rIndex));
+            sPlayers[rIndex].setLoopCrossFade(0.1);
+            sPlayers[rIndex].setLoopType(SamplePlayer.LoopType.LOOP_FORWARDS);
+            sPlayers[rIndex].setKillOnEnd(false);
+            sPlayers[rIndex].setRate(rGlides[rIndex]);
+            sPlayers[rIndex].start();
+            playing[rIndex] = true;
+            gains[rIndex].addInput(sPlayers[rIndex]);
+          }
         }
       }
       if (playing[lIndex]) {
-        gains[lIndex].setGain((lDepth-0.75)*10);
-        println(lDepth);
+          gains[lIndex].setGain((lDepth-0.75)*10);
+        }
+        if (playing[rIndex]) {
+          gains[rIndex].setGain((rDepth-0.75)*10);
+        }
+      if (stretching) {
+        edge e = new edge(lHand, rHand);
+        e.show();
       }
-      if (playing[rIndex]) {
-        gains[rIndex].setGain(rDepth);
-      }
-
-      //if (lIndex != lSample && skeleton.getLeftHandState() == 3) {
-      //  println("new lIndex");
-      //  sp1.setSample(samples.get(lIndex));
-      //  lSample = lIndex;
-      //  sp1.start();
-      //}
-
-      //if (rIndex != rSample && skeleton.getRightHandState() == 3) {
-      //  println("new rIndex");
-      //  sp2.setSample(samples.get(rIndex));
-      //  rSample = rIndex;
-      //  sp2.start();
-      //}
-      edge e = new edge(lHand, rHand);
-      e.show();
-
-
+     }
+      
 
       drawHandState(joints[KinectPV2.JointType_HandRight]);
       drawHandState(joints[KinectPV2.JointType_HandLeft]);
@@ -275,6 +322,18 @@ void draw() {
     lCool++;
     rCool++;
   }
+  
+  drawReverb();
+}
+
+void drawReverb() {
+  noFill();
+  stroke(color(255,255,255));
+  rect(30,marginVert, 10, height - 2 * marginVert);
+  stroke(0);
+  fill(color(255,255,255));
+  rect(30, marginVert + (height - marginVert - reverbValue)/100, 10, reverbValue/100);
+  
 }
 
 void drawBody(KJoint[] joints) {
@@ -285,9 +344,15 @@ void drawBody(KJoint[] joints) {
   }
 }
 void drawHandState(KJoint joint) {
+  pointLight(255,255,255,joint.getX(), joint.getY(), 10);
   fill(color(255,255,255));
   translate(joint.getX(), joint.getY(), 0);
-  sphere(15);
+  if (stretching) {
+    fill(color(255,255,0));
+    sphere(30);
+  } else {
+    sphere(15);
+  }
   translate(-joint.getX(), -joint.getY(), 0);
   fill(color(255, 255, 255));
   color c = depthImage.get((int)joint.getX(), (int)joint.getY());
