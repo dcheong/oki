@@ -1,3 +1,5 @@
+import de.voidplus.leapmotion.*;
+
 import gab.opencv.*;
 import org.opencv.imgproc.Imgproc;
 import org.opencv.core.Mat;
@@ -14,6 +16,7 @@ import KinectPV2.*;
 String collection = "edm";
 
 
+LeapMotion leap;
 KinectPV2 kinect;
 OpenCV opencv;
 
@@ -24,15 +27,18 @@ PImage depthImage;
 
 boolean loaded = false;
 
-ArrayList<Sample> samples;
-ArrayList<String> labels;
+ArrayList<Sample> samples = new ArrayList();
+ArrayList<Sample> samples2 = new ArrayList();
+ArrayList<String> labels = new ArrayList();
 AudioContext ac;
 SamplePlayer[] sPlayers = new SamplePlayer[12];
+SamplePlayer[] leapPlayers = new SamplePlayer[5];
 boolean[] playing = new boolean[12];
 boolean[] looping = new boolean[12];
 Glide[] vGlides = new Glide[12];
 Glide[] rGlides = new Glide[12];
 Gain[] gains = new Gain[12];
+Gain leapGain;
 
 Gain totalGain;
 Reverb reverb;
@@ -40,7 +46,6 @@ Glide reverbGlide;
 int reverbHand;
 float reverbValue = 1.0;
 
-SamplePlayer sp1, sp2;
 
 float volume = 0.;
 
@@ -110,14 +115,46 @@ void setup() {
   reverb.setDamping(0.5);
   reverbGlide = new Glide(ac, 0., 10);
   totalGain = new Gain(ac, 1, reverb);
+  leapGain = new Gain(ac, 1);
   reverb.addInput(totalGain);
   ac.out.addInput(reverb);
+  ac.out.addInput(leapGain);
   ac.start();
 
   leftHand = new hand();
   int pleft = 0;
   rightHand = new hand();
   int pright = 0;
+  
+  leap = new LeapMotion(this).allowGestures();
+}
+
+void load4(String collection) {
+  File dir = new File(sketchPath("") + "sound/" + collection);
+  File leapdir = new File(sketchPath("") + "sound/" + collection + "/leap");
+  String[] list = dir.list();
+  String[] leaplist = leapdir.list();
+  try {
+      for (String path : list) {
+        println(path);
+        samples.add(SampleManager.sample(sketchPath("") + "sound/" + collection + "/" + path));
+      }
+      
+      loaded = true;
+  } catch (Exception e) {
+    println("failed to load sounds");
+  }
+  try {
+    println(leaplist.length);
+    for (int i = 0; i < leaplist.length; i++) {
+        println(leaplist[i]);
+        println(SampleManager.sample(sketchPath("") + "sound/" + collection + "/leap/" + leaplist[i]) == null);
+        samples2.add(SampleManager.sample(sketchPath("") + "sound/" + collection + "/leap/" + leaplist[i]));
+      }
+  } catch (Exception e) {
+   e.printStackTrace();
+  }
+  
 }
 
 void draw() {
@@ -135,11 +172,13 @@ void draw() {
   noFill();
   stroke(255,255,255);
   strokeWeight(3);
-  ellipse(volume * 50, volume * 50, width/2, height/2);
   float fov = PI/2.5; 
   float cameraZ = (height/2.0) / tan(fov/2.0); 
   perspective(fov, float(width)/float(height), cameraZ/2.0, cameraZ*2.0); 
   background(color(volume * 255, volume * 100, 255-(volume * 100), volume * 200));
+  
+  checkPinchGrab();
+  
   if (stretching) {
     background(color(volume * 100, volume * 100, volume * 100));
   }
@@ -378,4 +417,155 @@ void drawHandState(KJoint joint) {
 
 float mapValue(float start, float val, float end) {
   return (val - start)/(end - start);
+}
+
+void leapOnSwipeGesture(SwipeGesture g, int state){
+  int     id               = g.getId();
+  Finger  finger           = g.getFinger();
+  PVector position         = g.getPosition();
+  PVector positionStart    = g.getStartPosition();
+  PVector direction        = g.getDirection();
+  float   speed            = g.getSpeed();
+  long    duration         = g.getDuration();
+  float   durationSeconds  = g.getDurationInSeconds();
+
+  switch(state){
+    case 1: // Start
+      break;
+    case 2: // Update
+      break;
+    case 3: // Stop
+      println("SwipeGesture: " + id);
+      break;
+  }
+}
+
+
+boolean lPinched = false;
+boolean rPinched = false;
+boolean lGrabbed = false;
+boolean rGrabbed = false;
+double leapCoolThresh = 48; //75BPM
+double pLeapCool = 0;
+double gLeapCool = 0;
+void checkPinchGrab() {
+  pLeapCool += 1;
+  gLeapCool += 1;
+  if (gLeapCool >= leapCoolThresh) {
+    for (Hand hand : leap.getHands()) {
+      if (hand.isValid()) {
+        if (hand.isRight()) {
+          processPinch(hand, false);
+          processGrab(hand, false);
+        } else if (hand.isLeft()) {
+          processPinch(hand, true);
+          processGrab(hand, true);
+        } 
+      }   
+    }
+    println("rGrabbed before execution " + rGrabbed);
+    println("lGrabbed before execution " + lGrabbed);
+    executeGrab(rGrabbed, 2);
+    executeGrab(lGrabbed, 3);
+    gLeapCool = 0;
+  }
+  if (pLeapCool >= 2*leapCoolThresh) {
+    println("rPinched before execution " + rPinched);
+    println("lPinched before execution " + lPinched);
+    executePinch(rPinched, 0);
+    executePinch(lPinched, 1);
+    pLeapCool = 0;
+  } 
+}
+
+void processPinch(Hand hand, boolean left) {
+  println("pollpinch-" + (left ? "left":"right") + ": " + " " + hand.getPinchStrength());
+  double pThresh = 0.25;
+  boolean right = !left;
+  if (hand.getPinchStrength() > pThresh && hand.getGrabStrength() < 0.25) {
+    println("pinched!");
+    if (left)
+      lPinched = !lPinched;
+    if (right)
+      rPinched = !rPinched;
+  }
+}
+
+void processGrab(Hand hand, boolean left) {
+  println("pollgrab-" + (left ? "left":"right") + ": " + " " + hand.getGrabStrength());
+  boolean right = !left;
+  if (hand.getGrabStrength() > 0.75) {
+    println("grabbed!");
+    if (left)
+      lGrabbed = !lGrabbed;
+    if (right)
+      rGrabbed = !rGrabbed;
+  }
+}
+
+void executePinch(boolean pinched, int pIndex) {
+  println("executingPinch for " + pIndex);
+  if (pinched) {
+    println("pinched " + pIndex);
+    leapPlayers[pIndex] = new SamplePlayer(ac, samples2.get(pIndex));
+    leapPlayers[pIndex].setKillOnEnd(true);
+    leapGain.addInput(leapPlayers[pIndex]);
+    leapPlayers[pIndex].start();
+  } 
+}
+
+void executeGrab(boolean grabbed, int gIndex) {
+  if (grabbed) {
+    println("grabbed " + gIndex);
+    leapPlayers[gIndex] = new SamplePlayer(ac, samples2.get(gIndex));
+    leapPlayers[gIndex].setKillOnEnd(true);
+    leapGain.addInput(leapPlayers[gIndex]);
+    leapPlayers[gIndex].start();
+  }
+}
+
+void leapOnKeyTapGesture(KeyTapGesture g){
+  //int     id               = g.getId();
+  //Finger  finger           = g.getFinger();
+  //PVector position         = g.getPosition();
+  //PVector direction        = g.getDirection();
+  //long    duration         = g.getDuration();
+  //float   durationSeconds  = g.getDurationInSeconds();
+  //println(finger.isValid());
+  //println(finger.getType());
+  //println("KeyTapGesture: " + id);
+  //switch(finger.getType()) {
+  //  case 0:
+  //    leapPlayers[0] = new SamplePlayer(ac, samples2.get(0));
+  //    leapPlayers[0].setKillOnEnd(true);
+  //    leapGain.addInput(leapPlayers[0]);
+  //    leapPlayers[0].start();
+  //    break;
+  //  case 1:
+  //    leapPlayers[1] = new SamplePlayer(ac, samples2.get(1));
+  //    leapPlayers[1].setKillOnEnd(true);
+  //    leapGain.addInput(leapPlayers[1]);
+  //    leapPlayers[1].start();
+  //    break;
+  //  case 2:
+  //    leapPlayers[2] = new SamplePlayer(ac, samples2.get(2));
+  //    leapPlayers[2].setKillOnEnd(true);
+  //    leapGain.addInput(leapPlayers[2]);
+  //    leapPlayers[2].start();
+  //    break;
+  //  case 3:
+  //    leapPlayers[3] = new SamplePlayer(ac, samples2.get(3));
+  //    leapPlayers[3].setKillOnEnd(true);
+  //    leapGain.addInput(leapPlayers[3]);
+  //    leapPlayers[3].start();
+  //    break;
+  //  case 4:
+  //    leapPlayers[4] = new SamplePlayer(ac, samples2.get(4));
+  //    leapPlayers[4].setKillOnEnd(true);
+  //    leapGain.addInput(leapPlayers[4]);
+  //    leapPlayers[4].start();
+  //    break;
+  //   default:
+  //     break;
+  //}
 }
