@@ -11,7 +11,7 @@ import org.jaudiolibs.beads.*;
 
 import KinectPV2.*;
 
-String collection = "cello";
+String collection = "edm";
 
 
 KinectPV2 kinect;
@@ -34,7 +34,9 @@ Glide[] vGlides = new Glide[12];
 Glide[] rGlides = new Glide[12];
 Gain[] gains = new Gain[12];
 
-Glide reverb;
+Gain totalGain;
+Reverb reverb;
+Glide reverbGlide;
 int reverbHand;
 float reverbValue = 1.0;
 
@@ -72,7 +74,7 @@ float marginHori = 50;
 int threshold = 10;
 double polygonFactor = 1;
 
-int maxD = 1000;
+int maxD = 800;
 int minD = 20;
 
 void setup() {   
@@ -102,7 +104,14 @@ void setup() {
     gains[i] = new Gain(ac, 1);
     ac.out.addInput(gains[i]);
   }
-  reverb = new Glide(ac, 1., 30);
+  
+  reverb = new Reverb(ac, 1);
+  reverb.setSize(0.7);
+  reverb.setDamping(0.5);
+  reverbGlide = new Glide(ac, 0., 10);
+  totalGain = new Gain(ac, 1, reverb);
+  reverb.addInput(totalGain);
+  ac.out.addInput(reverb);
   ac.start();
 
   leftHand = new hand();
@@ -123,6 +132,10 @@ void draw() {
     }
   }
   volume /= sum;
+  noFill();
+  stroke(255,255,255);
+  strokeWeight(3);
+  ellipse(volume * 50, volume * 50, width/2, height/2);
   float fov = PI/2.5; 
   float cameraZ = (height/2.0) / tan(fov/2.0); 
   perspective(fov, float(width)/float(height), cameraZ/2.0, cameraZ*2.0); 
@@ -137,7 +150,7 @@ void draw() {
     opencv.loadImage(kinect.getPointCloudDepthImage());
     opencv.threshold(threshold);
     opencv.blur(3);
-    PImage dst = opencv.getOutput();
+    //PImage dst = opencv.getOutput();
     //image(dst, 0, 0);
 
 
@@ -149,7 +162,8 @@ void draw() {
         
         if (playing[i*4+j]) {
           strokeWeight(3);
-          stroke(color(255,255,255));
+          float volume = gains[i*4+j].getGain();
+          stroke(color(255 - 100 * volume,255 * volume,255));
           noFill();
           float transX = j * tileWidth + tileWidth/2 + marginHori;
           float transY = i * tileHeight + tileHeight/2 + marginVert;
@@ -224,7 +238,6 @@ void draw() {
         && lHand.pos.y < height - marginVert) {
           if (skeleton.getLeftHandState() == 3 && lCool > cooldown) {
             lCool = 0;
-            println("left hand close: " + lIndex);
             if (playing[lIndex]) {
               sPlayers[lIndex].kill();
               rGlides[lIndex].setValue(1.);
@@ -238,15 +251,15 @@ void draw() {
               sPlayers[lIndex].start();
               playing[lIndex] = true;
               gains[lIndex].addInput(sPlayers[lIndex]);
+              totalGain.addInput(sPlayers[lIndex]);
             }
           }
         } else {
-          println(lHand.pos.x + " " + skeleton.getLeftHandState());
           if (lHand.pos.x < marginHori
           && lHand.pos.y > marginVert
           && lHand.pos.y < height - marginVert) {
             lHand.pos.x = 30;
-            reverbValue = 100 * (height - lHand.pos.y - 2 * marginVert)/(height - marginVert);
+            reverbValue = 1000 * (1 - mapValue(marginVert, lHand.pos.y, height - marginVert));
             reverb.setValue(reverbValue);
             println(reverbValue);
           }
@@ -271,6 +284,7 @@ void draw() {
             sPlayers[rIndex].start();
             playing[rIndex] = true;
             gains[rIndex].addInput(sPlayers[rIndex]);
+            totalGain.addInput(sPlayers[rIndex]);
           }
         }
       }
@@ -320,7 +334,7 @@ void draw() {
     }
 
     lCool++;
-    rCool++;
+    rCool++;   
   }
   
   drawReverb();
@@ -329,10 +343,14 @@ void draw() {
 void drawReverb() {
   noFill();
   stroke(color(255,255,255));
+  strokeWeight(1);
   rect(30,marginVert, 10, height - 2 * marginVert);
+  float rectHeight = mapValue(0.,reverbValue / 1000, height - 2*marginVert);
+  strokeWeight(3);
+  rect(30,marginVert + (height - (2 * marginVert)) - rectHeight, 10, rectHeight);
   stroke(0);
   fill(color(255,255,255));
-  rect(30, marginVert + (height - marginVert - reverbValue)/100, 10, reverbValue/100);
+  text(reverbValue, 20, marginVert - 10);
   
 }
 
@@ -356,4 +374,8 @@ void drawHandState(KJoint joint) {
   translate(-joint.getX(), -joint.getY(), 0);
   fill(color(255, 255, 255));
   color c = depthImage.get((int)joint.getX(), (int)joint.getY());
+}
+
+float mapValue(float start, float val, float end) {
+  return (val - start)/(end - start);
 }
