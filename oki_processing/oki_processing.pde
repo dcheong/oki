@@ -13,6 +13,7 @@ import org.jaudiolibs.beads.*;
 
 import KinectPV2.*;
 
+
 String collection = "edm";
 
 
@@ -79,7 +80,7 @@ float marginHori = 50;
 int threshold = 10;
 double polygonFactor = 1;
 
-int maxD = 800;
+int maxD = 1000;
 int minD = 20;
 
 void setup() {   
@@ -136,21 +137,28 @@ void load4(String collection) {
   String[] leaplist = leapdir.list();
   try {
       for (String path : list) {
+        if (path.contains(".")) {
+          
         println(path);
-        samples.add(SampleManager.sample(sketchPath("") + "sound/" + collection + "/" + path));
+        Sample s = SampleManager.sample(sketchPath("") + "sound/" + collection + "/" + path);
+        println("s nullity:" + (s == null));
+        samples.add(s);
+        }
       }
       
       loaded = true;
   } catch (Exception e) {
-    println("failed to load sounds");
+    e.printStackTrace();
   }
   try {
     println(leaplist.length);
     for (int i = 0; i < leaplist.length; i++) {
+      if (leaplist[i].contains(".")) {
         println(leaplist[i]);
         println(SampleManager.sample(sketchPath("") + "sound/" + collection + "/leap/" + leaplist[i]) == null);
         samples2.add(SampleManager.sample(sketchPath("") + "sound/" + collection + "/leap/" + leaplist[i]));
       }
+    }
   } catch (Exception e) {
    e.printStackTrace();
   }
@@ -275,7 +283,7 @@ void draw() {
         && lHand.pos.x < width - marginHori
         && lHand.pos.y > marginVert
         && lHand.pos.y < height - marginVert) {
-          if (skeleton.getLeftHandState() == 3 && lCool > cooldown) {
+          if (skeleton.getLeftHandState() == 3 && lCool > cooldown && lIndex >= 0 && lIndex < 12) {
             lCool = 0;
             if (playing[lIndex]) {
               sPlayers[lIndex].kill();
@@ -307,7 +315,7 @@ void draw() {
         && rHand.pos.x < width - marginHori
         && rHand.pos.y > marginVert
         && rHand.pos.y < height - marginVert) {
-        if (skeleton.getRightHandState() == 3 && rCool > cooldown) {
+        if (skeleton.getRightHandState() == 3 && rCool > cooldown && rIndex >= 0 && rIndex < 12) {
           rCool = 0;
           println("right hand close: " + rIndex);
           if (playing[rIndex]) {
@@ -315,6 +323,10 @@ void draw() {
             rGlides[rIndex].setValue(1.);
             playing[rIndex] = false;
           } else {
+            println("right Index: " + rIndex);
+            println("samplesLength: " + samples.size());
+            println(ac == null);
+            println(samples.get(rIndex) == null);
             sPlayers[rIndex] = new SamplePlayer(ac, samples.get(rIndex));
             sPlayers[rIndex].setLoopCrossFade(0.1);
             sPlayers[rIndex].setLoopType(SamplePlayer.LoopType.LOOP_FORWARDS);
@@ -328,14 +340,16 @@ void draw() {
         }
       }
       if (playing[lIndex]) {
-          gains[lIndex].setGain((lDepth-0.75)*10);
+          gains[lIndex].setGain((lDepth-0.6)*10);
         }
         if (playing[rIndex]) {
-          gains[rIndex].setGain((rDepth-0.75)*10);
+          gains[rIndex].setGain((rDepth-0.6)*10);
         }
       if (stretching) {
         edge e = new edge(lHand, rHand);
+        strokeWeight(3);
         e.show();
+        gains[bIndex].setGain(((lDepth + rDepth)/2-0.6)*10);
       }
      }
       
@@ -445,12 +459,12 @@ boolean lPinched = false;
 boolean rPinched = false;
 boolean lGrabbed = false;
 boolean rGrabbed = false;
-double leapCoolThresh = 48; //75BPM
+double leapCoolThresh = 48.0; //150
 double pLeapCool = 0;
 double gLeapCool = 0;
 void checkPinchGrab() {
-  pLeapCool += 1;
-  gLeapCool += 1;
+  pLeapCool++;
+  gLeapCool++;
   if (gLeapCool >= leapCoolThresh) {
     for (Hand hand : leap.getHands()) {
       if (hand.isValid()) {
